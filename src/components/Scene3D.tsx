@@ -1107,8 +1107,8 @@ export default function Scene3D() {
   
   // Add camera logging state
   const [cameraInfo, setCameraInfo] = useState<{position: [number, number, number], rotation: [number, number, number]}>({
-    position: [-0.15, 1.74, 1.15],
-    rotation: [-12.2, -20.83, -4.4]
+    position: [-0.15, 1.83, 1.04],
+    rotation: [-17.89, -22.75, -7.12]
   });
   const [showCameraInfo, setShowCameraInfo] = useState<boolean>(false);
   const orbitControlsRef = useRef<any>(null);
@@ -1264,35 +1264,39 @@ export default function Scene3D() {
     }
   };
 
-  // Add a useEffect to set up the camera correctly after it's created
+  // Completely revise the camera setup useEffect to ensure consistent rotation
   useEffect(() => {
     if (cameraRef.current) {
       // Set the position directly
-      cameraRef.current.position.set(-0.15, 1.74, 1.15);
+      cameraRef.current.position.set(-0.15, 1.83, 1.04);
       
-      // Create a dummy target point
-      const targetPosition = new THREE.Vector3(0, 1, 0);
+      // Create the rotation matrix from Euler angles (in degrees)
+      const rotX = THREE.MathUtils.degToRad(-17.89);
+      const rotY = THREE.MathUtils.degToRad(-22.75);
+      const rotZ = THREE.MathUtils.degToRad(-7.12);
       
-      // Apply the rotation by looking at a calculated point
-      // We'll use a matrix to transform the forward vector based on our desired euler angles
-      const euler = new THREE.Euler(
-        THREE.MathUtils.degToRad(-12.2), 
-        THREE.MathUtils.degToRad(-20.83), 
-        THREE.MathUtils.degToRad(-4.4),
-        'XYZ'
+      // Apply rotation using quaternion for more stability
+      const quaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
       );
+      cameraRef.current.quaternion.copy(quaternion);
       
-      // Set the rotation directly using the euler
-      cameraRef.current.rotation.copy(euler);
+      // Force camera to update its matrix
+      cameraRef.current.updateMatrix();
+      cameraRef.current.updateMatrixWorld(true);
       
       // Disable controls initially
       if (orbitControlsRef.current) {
         orbitControlsRef.current.enabled = false;
+        // Update target to match the camera's look direction
+        orbitControlsRef.current.target.set(0, 1, 0);
+        orbitControlsRef.current.update();
       }
       
-      console.log('Camera initialized with fixed position and rotation');
+      console.log('Camera initialized with fixed position:', [-0.15, 1.83, 1.04]);
+      console.log('Camera initialized with fixed rotation:', [-17.89, -22.75, -7.12]);
     }
-  }, [cameraRef, orbitControlsRef]);
+  }, []);
   
   return (
     <div className="relative w-full h-screen">
@@ -1300,7 +1304,7 @@ export default function Scene3D() {
         <Suspense fallback={null}>
           <PerspectiveCamera 
             makeDefault 
-            position={[-0.15, 1.74, 1.15]} 
+            position={[-0.15, 1.83, 1.04]} 
             fov={50} 
             ref={cameraRef}
           />
