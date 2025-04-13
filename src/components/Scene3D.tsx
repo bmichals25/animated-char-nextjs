@@ -1098,19 +1098,115 @@ function ControlPanel({
   );
 }
 
+function CameraRig({ targetPosition, targetRotationDeg, controlsRef }: {
+  targetPosition: [number, number, number];
+  targetRotationDeg: [number, number, number];
+  controlsRef: React.RefObject<any>;
+}) {
+  const { camera } = useThree();
+  const initialSetupDone = useRef(false);
+  const animationFrameId = useRef<number | null>(null);
+
+  // Force camera position immediately on mount and when props change
+  useEffect(() => {
+    console.log('[CameraRig] Initial setup starting with position:', targetPosition, 'rotation:', targetRotationDeg);
+    
+    if (camera) {
+      // Set position immediately
+      camera.position.set(targetPosition[0], targetPosition[1], targetPosition[2]);
+      
+      // Set rotation immediately
+      const rotX = THREE.MathUtils.degToRad(targetRotationDeg[0]);
+      const rotY = THREE.MathUtils.degToRad(targetRotationDeg[1]);
+      const rotZ = THREE.MathUtils.degToRad(targetRotationDeg[2]);
+      const quaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
+      );
+      camera.quaternion.copy(quaternion);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      
+      console.log('[CameraRig] Immediate camera position set to:', camera.position.toArray());
+      console.log('[CameraRig] Immediate camera quaternion set to:', camera.quaternion.toArray());
+    }
+  }, [camera, targetPosition, targetRotationDeg]);
+
+  useEffect(() => {
+    const trySetup = () => {
+      if (initialSetupDone.current) return;
+
+      const currentControls = controlsRef.current;
+
+      console.log('[CameraRig trySetup Ref] Attempting setup. Camera:', camera ? 'Exists' : 'null', 'Controls Ref:', currentControls ? 'Exists' : 'null');
+
+      // Check if camera AND controls REF are ready NOW (and have target prop)
+      if (currentControls && camera && currentControls.target) {
+          console.log('[CameraRig trySetup Ref] Applying DEFAULT initial camera state via REF...');
+
+          // --- Log current state BEFORE setting ---
+          console.log('   BEFORE Setting - Camera Pos:', camera.position.toArray());
+          console.log('   BEFORE Setting - Camera Quat:', camera.quaternion.toArray());
+          // ---------------------------------------------
+
+          // --- Perform Setup Logic using Ref ---
+          camera.position.set(...targetPosition);
+          const rotX = THREE.MathUtils.degToRad(targetRotationDeg[0]);
+          const rotY = THREE.MathUtils.degToRad(targetRotationDeg[1]);
+          const rotZ = THREE.MathUtils.degToRad(targetRotationDeg[2]);
+          const quaternion = new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
+          );
+          camera.quaternion.copy(quaternion);
+          camera.updateProjectionMatrix();
+          camera.updateMatrixWorld(true);
+
+          // Use controlsRef.current directly
+          currentControls.target.set(0, 1.0, 0);
+          currentControls.enabled = false; // Disable controls
+          currentControls.update();
+          // --- End Setup Logic ---
+
+          initialSetupDone.current = true;
+
+          console.log('[CameraRig trySetup Ref] DEFAULT Initial camera setup complete via REF. Controls DISABLED.');
+          console.log('   Default Position set to:', targetPosition);
+          console.log('   Default Rotation set to (deg):', targetRotationDeg);
+
+      } else {
+           console.log('[CameraRig trySetup Ref] Waiting for camera/controls REF... scheduling retry.');
+           // Only schedule retry if setup is not done
+           if (!initialSetupDone.current) { 
+                animationFrameId.current = requestAnimationFrame(trySetup);
+           }
+      }
+    }; // End of trySetup
+
+    trySetup(); // Start polling
+
+    // Cleanup
+    return () => {
+      if (animationFrameId.current !== null) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [camera, controlsRef, targetPosition, targetRotationDeg]);
+
+  return null;
+}
+
 export default function Scene3D() {
-  // --- Refs ---
   const modelRef = useRef<ModelRef>(null);
   const orbitControlsRef = useRef<any>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
-  // Use a ref flag for one-time setup to avoid StrictMode issues
-  const initialSetupDone = useRef(false);
+  
+  // Use refs for the default camera values so they can be updated
+  const defaultTargetPosition = useRef<[number, number, number]>([-0.18, 1.73, 1.2]);
+  const defaultTargetRotationDeg = useRef<[number, number, number]>([-11.36, -22.22, -4.35]);
+  const initialSetupComplete = useRef<boolean>(false);
 
-  // --- State ---
   const [morphTargets, setMorphTargets] = useState<Expression>({});
   const [showControls, setShowControls] = useState<boolean>(true);
   const [animationsLoaded, setAnimationsLoaded] = useState<boolean>(false);
-  // State for *displaying* camera info - updated ONLY by logCameraPosition
   const [cameraInfo, setCameraInfo] = useState<{position: [number, number, number], rotation: [number, number, number]}>({
     position: [-0.18, 1.73, 1.2],
     rotation: [-11.36, -22.22, -4.35]
@@ -1123,50 +1219,66 @@ export default function Scene3D() {
     'CC_Base_Spine02': { rotation: [0, 0, 0] },
   });
 
+  const [manualCamPos, setManualCamPos] = useState<[string, string, string]>(["-0.18", "1.73", "1.2"]);
+  const [manualCamRot, setManualCamRot] = useState<[string, string, string]>(["-11.36", "-22.22", "-4.35"]);
+
   console.log(`[Scene3D Render]`);
 
-  // --- Callbacks ---
   const logCameraPosition = useCallback(() => {
-    // This function NOW reads the *actual* current camera state
     if (cameraRef.current) {
       const camera = cameraRef.current;
+      const precision = 5;
+
+      // Save the existing values first
+      const existingPos = camera.position.clone();
+      const existingQuat = camera.quaternion.clone();
+
       const pos: [number, number, number] = [
-        parseFloat(camera.position.x.toFixed(2)),
-        parseFloat(camera.position.y.toFixed(2)),
-        parseFloat(camera.position.z.toFixed(2))
+        parseFloat(camera.position.x.toFixed(precision)),
+        parseFloat(camera.position.y.toFixed(precision)),
+        parseFloat(camera.position.z.toFixed(precision))
        ];
       const euler = new THREE.Euler(0, 0, 0, 'XYZ').setFromQuaternion(camera.quaternion);
       const rot: [number, number, number] = [
-        parseFloat(THREE.MathUtils.radToDeg(euler.x).toFixed(2)),
-        parseFloat(THREE.MathUtils.radToDeg(euler.y).toFixed(2)),
-        parseFloat(THREE.MathUtils.radToDeg(euler.z).toFixed(2))
+        parseFloat(THREE.MathUtils.radToDeg(euler.x).toFixed(precision)),
+        parseFloat(THREE.MathUtils.radToDeg(euler.y).toFixed(precision)),
+        parseFloat(THREE.MathUtils.radToDeg(euler.z).toFixed(precision))
        ];
-      console.log('Current Camera Position:', pos);
-      console.log('Current Camera Rotation (degrees):', rot);
-      setCameraInfo({ position: pos, rotation: rot }); // Update state with ACTUAL values
+      console.log('Actual Camera Pos:', pos, 'Rot:', rot);
+      
+      // Store the logged position as our default target positions
+      // This ensures consistency between logging and camera control
+      defaultTargetPosition.current = [...pos];
+      defaultTargetRotationDeg.current = [...rot];
+      
+      setCameraInfo({ position: pos, rotation: rot });
       setShowCameraInfo(true);
+      
+      // Ensure the camera position doesn't get altered by logging
+      // by explicitly enforcing the position we just logged
+      camera.position.copy(existingPos);
+      camera.quaternion.copy(existingQuat);
+    } else {
+       console.warn("cameraRef not available for logging");
     }
   }, []);
   
   const lockCamera = useCallback(() => {
     if (orbitControlsRef.current) {
-      orbitControlsRef.current.enabled = false;
-      // Log the ACTUAL current state when locking
-      if (cameraRef.current) {
-        const cam = cameraRef.current;
-        const pos: [number, number, number] = [cam.position.x, cam.position.y, cam.position.z];
-        const euler = new THREE.Euler(0,0,0,'XYZ').setFromQuaternion(cam.quaternion);
-        const rotDeg: [number, number, number] = [THREE.MathUtils.radToDeg(euler.x), THREE.MathUtils.radToDeg(euler.y), THREE.MathUtils.radToDeg(euler.z)];
-        console.log('Camera locked at ACTUAL Pos:', pos, 'Rot:', rotDeg);
-      }
-    }
+        orbitControlsRef.current.enabled = false;
+        console.log('Camera locked via button.');
+    } else { console.warn("orbitControlsRef not available for lock"); }
   }, []);
   
   const unlockCamera = useCallback(() => {
     if (orbitControlsRef.current) {
-      orbitControlsRef.current.enabled = true;
-      console.log('Camera unlocked');
-    }
+        orbitControlsRef.current.enabled = true;
+        orbitControlsRef.current.enableRotate = true; // Only enable rotation
+        orbitControlsRef.current.enableZoom = true; // Optional: allow zooming
+        orbitControlsRef.current.enablePan = false; // Keep panning disabled
+        orbitControlsRef.current.autoRotate = false; // Ensure no auto-rotation
+        console.log('Camera partially unlocked via button - rotation and zoom only.');
+    } else { console.warn("orbitControlsRef not available for unlock"); }
   }, []);
   
   const handleMorphTargetChange = (target: string, value: number) => { 
@@ -1220,61 +1332,182 @@ export default function Scene3D() {
     } else { console.warn('Model ref not available for animation.'); }
   };
 
-  // --- Effects ---
-  useEffect(() => {
-    // Check refs and the one-time setup flag
-    if (!initialSetupDone.current && cameraRef.current && orbitControlsRef.current) {
+  const handleApplyManualCamera = useCallback(() => {
+    if (cameraRef.current && orbitControlsRef.current) {
       const camera = cameraRef.current;
       const controls = orbitControlsRef.current;
 
-      console.log('[useEffect] Applying initial camera state...');
+      try {
+        const pos = manualCamPos.map(Number) as [number, number, number];
+        const rotDeg = manualCamRot.map(Number) as [number, number, number];
 
-      // Define target state explicitly
-      const targetPosition: [number, number, number] = [-0.18, 1.73, 1.2];
-      const targetRotationDeg: [number, number, number] = [-11.36, -22.22, -4.35];
+        if (pos.some(isNaN) || rotDeg.some(isNaN)) {
+            alert('Invalid number format in camera inputs.');
+            return;
+        }
 
-      // 1. Set Position & Rotation directly on the Three.js objects
-      camera.position.set(...targetPosition);
-      const rotX = THREE.MathUtils.degToRad(targetRotationDeg[0]);
-      const rotY = THREE.MathUtils.degToRad(targetRotationDeg[1]);
-      const rotZ = THREE.MathUtils.degToRad(targetRotationDeg[2]);
-      const quaternion = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
-      );
-      camera.quaternion.copy(quaternion);
+        console.log('[Manual Apply] Setting camera state...');
+        console.log('   Target Pos:', pos);
+        console.log('   Target Rot (deg):', rotDeg);
 
-      // 2. Update Camera Matrices
-      camera.updateProjectionMatrix();
-      camera.updateMatrixWorld(true); // Force update world matrix
+        // Fully disable controls
+        controls.enabled = false;
+        controls.enableZoom = false;
+        controls.enablePan = false;
+        controls.enableRotate = false;
+        controls.autoRotate = false;
+        
+        console.log('[Manual Apply] Controls fully disabled before applying state.');
 
-      // 3. Configure OrbitControls
-      controls.target.set(0, 1.0, 0); // Set the point camera looks at
-      controls.enabled = false; // Disable controls initially
+        // Set position and rotation
+        camera.position.set(...pos);
+        const rotX = THREE.MathUtils.degToRad(rotDeg[0]);
+        const rotY = THREE.MathUtils.degToRad(rotDeg[1]);
+        const rotZ = THREE.MathUtils.degToRad(rotDeg[2]);
+        const quaternion = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
+        );
+        camera.quaternion.copy(quaternion);
 
-      // 4. CRITICAL: Update OrbitControls internal state AFTER setting camera state
-      controls.update();
+        camera.updateProjectionMatrix();
+        camera.updateMatrixWorld(true);
 
-      // 5. Mark setup as done using the ref flag
-      initialSetupDone.current = true;
+        // Fixed target position
+        controls.target.set(0, 1.0, 0);
+        controls.update();
+        
+        // Store these values as the new defaults
+        // This helps prevent other effects from overriding our manual camera position
+        defaultTargetPosition.current = [...pos];
+        defaultTargetRotationDeg.current = [...rotDeg];
+        console.log('[Manual Apply] Camera state applied and default targets updated to:', 
+          defaultTargetPosition.current, defaultTargetRotationDeg.current);
 
-      console.log('[useEffect] Initial camera setup attempt complete.');
-      console.log('   Attempted Position:', targetPosition);
-      console.log('   Attempted Rotation (deg):', targetRotationDeg);
-      // Note: We don't setCameraInfo here. Log button reads actual state.
+        // Update the displayed camera info to match what we just set
+        setCameraInfo({
+          position: pos,
+          rotation: rotDeg
+        });
+        setShowCameraInfo(true);
+
+      } catch (error) {
+        console.error('Error applying manual camera transform:', error);
+        alert('Failed to apply camera transform. Check console.');
+      }
+    } else {
+      console.warn('[Manual Apply] Camera or controls ref not ready.');
+      alert('Camera or controls not ready yet.');
+    }
+  }, [manualCamPos, manualCamRot]);
+
+  const handleUseCurrentForManual = useCallback(() => {
+    if (cameraInfo.position && cameraInfo.rotation) {
+      const posStrings = cameraInfo.position.map(String) as [string, string, string];
+      const rotStrings = cameraInfo.rotation.map(String) as [string, string, string];
+      setManualCamPos(posStrings);
+      setManualCamRot(rotStrings);
+      console.log('Manual input fields updated with current logged values.');
+      alert('Manual input fields updated with current logged values.');
+    } else {
+      alert('No current camera values logged yet. Click "Log Current Values" first.');
+    }
+  }, [cameraInfo]);
+
+  // Reset camera position on first render and force it into place
+  useEffect(() => {
+    // Only run once on first mount
+    if (!initialSetupComplete.current) {
+      console.log('[Scene3D] CRITICAL initial camera position setup');
+      
+      // Immediate setup
+      if (cameraRef.current) {
+        const camera = cameraRef.current;
+        const pos = [-0.18, 1.73, 1.2] as [number, number, number]; // Hard-coded position
+        const rotDeg = [-11.36, -22.22, -4.35] as [number, number, number]; // Hard-coded rotation
+        
+        // Apply position
+        camera.position.set(...pos);
+        
+        // Apply rotation
+        const rotX = THREE.MathUtils.degToRad(rotDeg[0]);
+        const rotY = THREE.MathUtils.degToRad(rotDeg[1]);
+        const rotZ = THREE.MathUtils.degToRad(rotDeg[2]);
+        const quaternion = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
+        );
+        camera.quaternion.copy(quaternion);
+        
+        // Update matrices
+        camera.updateProjectionMatrix();
+        camera.updateMatrixWorld(true);
+        
+        console.log('[Scene3D] CRITICAL camera setup complete:', 
+          'Position:', camera.position.toArray(),
+          'Rotation:', rotDeg);
+      }
+      
+      // Multiple attempts with increasing delays to overcome any race conditions
+      const attempts = [0, 100, 300, 500, 1000]; // milliseconds
+      
+      attempts.forEach(delay => {
+        setTimeout(() => {
+          if (cameraRef.current) {
+            const camera = cameraRef.current;
+            camera.position.set(-0.18, 1.73, 1.2);
+            
+            const rotX = THREE.MathUtils.degToRad(-11.36);
+            const rotY = THREE.MathUtils.degToRad(-22.22);
+            const rotZ = THREE.MathUtils.degToRad(-4.35);
+            camera.quaternion.setFromEuler(new THREE.Euler(rotX, rotY, rotZ, 'XYZ'));
+            
+            camera.updateProjectionMatrix();
+            camera.updateMatrixWorld(true);
+            
+            // If we have orbit controls, forcibly disable them and set the target
+            if (orbitControlsRef.current) {
+              const controls = orbitControlsRef.current;
+              controls.enabled = false;
+              controls.enableZoom = false;
+              controls.enablePan = false;
+              controls.enableRotate = false;
+              controls.target.set(0, 1.0, 0);
+              controls.update();
+            }
+            
+            console.log(`[Scene3D] Attempt at ${delay}ms: Position set to:`, camera.position.toArray());
+          }
+        }, delay);
+      });
+      
+      initialSetupComplete.current = true;
     }
   }, []);
 
-  // --- Render ---
   return (
     <div className="relative w-full h-screen">
-      <Canvas shadows>
+      <Canvas 
+        shadows 
+        camera={{ 
+          position: [-0.18, 1.73, 1.2], 
+          rotation: [THREE.MathUtils.degToRad(-11.36), THREE.MathUtils.degToRad(-22.22), THREE.MathUtils.degToRad(-4.35)],
+          fov: 50
+        }}
+      >
         <Suspense fallback={null}>
           <PerspectiveCamera
             makeDefault
-            // NO initial position/rotation props here
             fov={50}
             ref={cameraRef}
+            position={[-0.18, 1.73, 1.2]} 
+            rotation={[THREE.MathUtils.degToRad(-11.36), THREE.MathUtils.degToRad(-22.22), THREE.MathUtils.degToRad(-4.35)]}
           />
+
+          <CameraRig
+            targetPosition={[-0.18, 1.73, 1.2]}
+            targetRotationDeg={[-11.36, -22.22, -4.35]}
+            controlsRef={orbitControlsRef}
+          />
+
           <ambientLight intensity={0.5} />
           <directionalLight position={[5, 5, 5]} intensity={1.5} castShadow />
           <Model
@@ -1283,49 +1516,86 @@ export default function Scene3D() {
             onAnimationsLoaded={() => { setAnimationsLoaded(true); }}
             animationsLoaded={animationsLoaded}
           />
+
           <OrbitControls
             ref={orbitControlsRef}
-            target={[0, 1.0, 0]} // Target hint matches setup
             enableDamping={true}
             dampingFactor={0.25}
-            // enabled state is controlled by useEffect and lock/unlock buttons
+            enabled={false} // Start with controls disabled
+            enableZoom={false}
+            enablePan={false}
+            enableRotate={false}
+            autoRotate={false}
           />
+
           <Environment preset="sunset" />
         </Suspense>
       </Canvas>
 
-       {/* UI Panels */}
-       <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg">
-         <button onClick={logCameraPosition} className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2">Log Camera Position</button>
-         <div className="flex space-x-2">
-           <button onClick={lockCamera} className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">Lock</button>
-           <button onClick={unlockCamera} className="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">Unlock</button>
-         </div>
-         {showCameraInfo && (
-            <div className="mt-2 text-xs">
+      <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg w-64 z-10">
+        <h3 className="text-sm font-semibold mb-2 text-black">Current Camera</h3>
+        <button onClick={logCameraPosition} className="w-full px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2">Log Current Values</button>
+        <div className="flex space-x-2 mb-2">
+          <button onClick={lockCamera} className="flex-1 px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">Lock Controls</button>
+          <button onClick={unlockCamera} className="flex-1 px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">Unlock Controls</button>
+        </div>
+        {showCameraInfo && ( 
+            <div className="mt-2 text-xs space-y-1">
                 <p className="font-semibold">Position:</p>
                 <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
                 <p className="font-semibold mt-1">Rotation (deg):</p>
                 <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
+                <button onClick={handleUseCurrentForManual} className="mt-2 w-full px-2 py-1 bg-teal-500 text-white text-xs rounded hover:bg-teal-600" title="Copies the logged values above into the manual input fields below">Use These Values for Manual Set</button>
                 <button onClick={() => { 
                     console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
                     navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
                     .then(() => alert('Camera info copied to clipboard!'))
                     .catch(err => console.error('Could not copy text: ', err));
-                 }} className="mt-2 px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">Copy JSON</button>
+                 }} className="mt-1 w-full px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">Copy Current JSON</button>
             </div>
-         )}
-       </div>
-       {showControls && ( <ControlPanel 
-             targets={morphTargets}
-             onChange={handleMorphTargetChange}
-             onPresetClick={handlePresetClick}
-             boneControls={boneControls}
-             onBoneRotationChange={handleBoneRotationChange}
-             onBodyPoseClick={handleBodyPoseClick}
-             onAnimationClick={handleAnimationClick}
-             animationsLoaded={animationsLoaded}
-        /> )}
+        )}
+        <div className="mt-4 pt-3 border-t border-gray-300">
+          <h3 className="text-sm font-semibold mb-2 text-black">Manual Camera Set</h3>
+          <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+              <div>
+                  <label className="block font-medium mb-1">Pos X:</label>
+                  <input type="number" step="0.01" value={manualCamPos[0]} onChange={e => setManualCamPos([e.target.value, manualCamPos[1], manualCamPos[2]])} className="w-full p-1 border rounded" />
+              </div>
+              <div>
+                  <label className="block font-medium mb-1">Rot X:</label>
+                  <input type="number" step="0.01" value={manualCamRot[0]} onChange={e => setManualCamRot(prev => [e.target.value, prev[1], prev[2]])} className="w-full p-1 border rounded" />
+              </div>
+               <div>
+                  <label className="block font-medium mb-1">Pos Y:</label>
+                  <input type="number" step="0.01" value={manualCamPos[1]} onChange={e => setManualCamPos([manualCamPos[0], e.target.value, manualCamPos[2]])} className="w-full p-1 border rounded" />
+              </div>
+               <div>
+                  <label className="block font-medium mb-1">Rot Y:</label>
+                  <input type="number" step="0.01" value={manualCamRot[1]} onChange={e => setManualCamRot(prev => [prev[0], e.target.value, prev[2]])} className="w-full p-1 border rounded" />
+              </div>
+               <div>
+                  <label className="block font-medium mb-1">Pos Z:</label>
+                  <input type="number" step="0.01" value={manualCamPos[2]} onChange={e => setManualCamPos([manualCamPos[0], manualCamPos[1], e.target.value])} className="w-full p-1 border rounded" />
+              </div>
+               <div>
+                  <label className="block font-medium mb-1">Rot Z:</label>
+                  <input type="number" step="0.01" value={manualCamRot[2]} onChange={e => setManualCamRot(prev => [prev[0], prev[1], e.target.value])} className="w-full p-1 border rounded" />
+              </div>
+          </div>
+          <button onClick={handleApplyManualCamera} className="w-full px-3 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600">Apply Manual Transform</button>
+        </div>
+      </div>
+
+      {showControls && ( <ControlPanel 
+            targets={morphTargets}
+            onChange={handleMorphTargetChange}
+            onPresetClick={handlePresetClick}
+            boneControls={boneControls}
+            onBoneRotationChange={handleBoneRotationChange}
+            onBodyPoseClick={handleBodyPoseClick}
+            onAnimationClick={handleAnimationClick}
+            animationsLoaded={animationsLoaded}
+       /> )}
     </div>
   );
 } 
