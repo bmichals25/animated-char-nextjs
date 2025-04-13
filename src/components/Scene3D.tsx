@@ -29,8 +29,8 @@ interface MorphTargetData {
   [key: string]: string[];
 }
 
-// Define some common facial expression presets
-const EXPRESSION_PRESETS: { [key: string]: { [key: string]: number } } = {
+// Define some common facial expression presets (Original - Keep for reference)
+const ORIGINAL_EXPRESSION_PRESETS: { [key: string]: { [key: string]: number } } = {
   'Neutral': {},
   'Happy': {
     'Mouth_Smile': 1.0,
@@ -100,13 +100,37 @@ const EXPRESSION_PRESETS: { [key: string]: { [key: string]: number } } = {
     'Eyebrow_Down_R': 0.6,
     'Mouth_Pout': 0.4,
     'Eye_Squint_L': 0.3,
-    'Head_Tilt': 0.5
+    'Head_Tilt': 0.5 // Note: Head_Tilt might involve bone rotation, not just morphs
   }
+};
+
+// Define NEW minimal facial expression presets for testing isolation
+const EXPRESSION_PRESETS: { [key: string]: { [key: string]: number } } = {
+  'Neutral': {}, // Reset to zero
+  'Smile_Simple': {
+    'Mouth_Smile': 0.8, // Only mouth smile
+  },
+  'Sad_Simple': {
+    'Mouth_Sad': 0.7,   // Only mouth sad
+    'Eyebrow_Sad_L': 0.6,
+    'Eyebrow_Sad_R': 0.6
+  },
+   'Surprise_Simple': {
+    'Mouth_Open': 0.7,
+    'Eye_Wide_L': 0.8,
+    'Eye_Wide_R': 0.8,
+  },
+  'Blink_L': {
+    'Eye_Blink_L': 1.0, // Only left eye blink
+  },
+   'Blink_R': {
+    'Eye_Blink_R': 1.0, // Only right eye blink
+  },
 };
 
 // Define body pose presets (bone name -> [x, y, z] rotation in degrees)
 const BODY_POSE_PRESETS: { [presetName: string]: { [boneName: string]: [number, number, number] } } = {
-  'Reset': { // A pose to reset back to 0 rotations
+  'Reset': { // A pose to reset back to 0 rotations (Use this for neutral)
     'CC_Base_Head': [0, 0, 0],
     'CC_Base_L_Upperarm': [0, 0, 0],
     'CC_Base_R_Upperarm': [0, 0, 0],
@@ -317,10 +341,30 @@ const Model = forwardRef<ModelRef, {
   useImperativeHandle(ref, () => ({
     applyExpression,
     setMorphTargetValue: (target: string, value: number) => {
-      setSelectedTarget(target);
-      setCurrentValue(value);
+      console.log(`[Model Ref] Setting morph target ${target} directly to ${value}`);
+      morphMeshes.forEach(mesh => {
+        if (mesh.morphTargetDictionary && target in mesh.morphTargetDictionary) {
+          const index = mesh.morphTargetDictionary[target];
+           if (mesh.morphTargetInfluences) {
+            // Ensure the influence value is clamped between 0 and 1
+            const clampedValue = Math.max(0, Math.min(1, value));
+            mesh.morphTargetInfluences[index] = clampedValue; // Set influence directly
+             console.log(` -> Set ${target} (index ${index}) to ${clampedValue} on mesh ${mesh.name}`);
+           }
+        } else {
+            // Optional: Warn if the target isn't found on a mesh expected to have it
+            if (mesh.morphTargetDictionary && morphMeshes.length > 0) { // Check if morphs are generally expected
+               // console.warn(`[Model Ref] Morph target '${target}' not found in dictionary for mesh ${mesh.name}`);
+            }
+        }
+      });
+       // Update the internal morphTargets state used by the Model component itself
+       // This helps keep the blink animation logic potentially consistent if needed
+       setMorphTargets(prev => ({
+         ...prev,
+         [target]: value // Keep the UI state updated
+       }));
     },
-    // Add function to set bone rotation
     setBoneRotation: (boneName: string, rotation: [number, number, number]) => {
       console.log(`[Model Ref] setBoneRotation called for ${boneName}`, rotation);
       const bone = controllableBones.current.get(boneName);
@@ -336,7 +380,6 @@ const Model = forwardRef<ModelRef, {
         console.warn(`Bone ${boneName} not found in controllableBones ref.`);
       }
     },
-    // Add function to apply a body pose preset
     applyBodyPose: (presetName: string) => {
       console.log(`[Model Ref] Applying body pose preset: ${presetName}`);
       const preset = BODY_POSE_PRESETS[presetName];
@@ -360,7 +403,6 @@ const Model = forwardRef<ModelRef, {
         }
       });
     },
-    // Add function to play an animation
     playAnimation: playAnimationLocal
   }));
 
@@ -740,30 +782,6 @@ const Model = forwardRef<ModelRef, {
     };
   }, []);
   
-  // Update morph target values when they change
-  useEffect(() => {
-    if (morphMeshes.length === 0 || !selectedTarget) return;
-    
-    // Start animating to the new value
-    morphMeshes.forEach(mesh => {
-      if (mesh.morphTargetDictionary && selectedTarget in mesh.morphTargetDictionary) {
-        const index = mesh.morphTargetDictionary[selectedTarget];
-        const startValue = mesh.morphTargetInfluences![index];
-        
-        // Create animation
-        const animKey = `${mesh.uuid}_${selectedTarget}`;
-        currentAnimations.current.set(animKey, {
-          mesh,
-          index,
-          startValue,
-          targetValue: currentValue,
-          startTime: Date.now(),
-          duration: 300
-        });
-      }
-    });
-  }, [morphMeshes, selectedTarget, currentValue]);
-  
   // Effect to auto-play idle animation once model and clips are loaded
   useEffect(() => {
     // Only run when model AND animations are loaded
@@ -782,102 +800,48 @@ const Model = forwardRef<ModelRef, {
     const preset = EXPRESSION_PRESETS[presetName] || {};
     console.log('Preset values:', preset);
     
-    // Clear all current animations
+    // --- MODIFICATION START ---
+    // Clear any ongoing animations from the animation system (just in case)
     currentAnimations.current.clear();
     
-    // For each mesh with morph targets
+    // Apply morph targets directly, bypassing the animation system
     morphMeshes.forEach(mesh => {
       if (mesh.morphTargetDictionary && mesh.morphTargetInfluences) {
-        console.log(`Applying preset to ${mesh.name}`);
-        
-        // Create animations for each target in the preset
+        console.log(`Applying preset directly to ${mesh.name}`);
+
+        // Set influences defined in the preset
         Object.entries(preset).forEach(([targetName, targetValue]) => {
           if (targetName in mesh.morphTargetDictionary!) {
             const index = mesh.morphTargetDictionary![targetName];
-            const startValue = mesh.morphTargetInfluences![index];
-            
-            // Add animation
-            const animKey = `${mesh.uuid}_${targetName}`;
-            currentAnimations.current.set(animKey, {
-              mesh,
-              index,
-              startValue,
-              targetValue,
-              startTime: Date.now(),
-              duration: 500 // Slightly longer animation for expressions
-            });
+            mesh.morphTargetInfluences![index] = targetValue; // Set directly
+             console.log(` -> Set ${targetName} (index ${index}) to ${targetValue}`);
           }
         });
-        
-        // Reset any morph targets not in the preset
+
+        // Reset influences *not* defined in the preset to 0
         Object.keys(mesh.morphTargetDictionary).forEach(targetName => {
           if (!(targetName in preset)) {
             const index = mesh.morphTargetDictionary![targetName];
-            const startValue = mesh.morphTargetInfluences![index];
-            
-            // Only animate if the current value is not already 0
-            if (startValue !== 0) {
-              const animKey = `${mesh.uuid}_${targetName}`;
-              currentAnimations.current.set(animKey, {
-                mesh,
-                index,
-                startValue,
-                targetValue: 0,
-                startTime: Date.now(),
-                duration: 400
-              });
+            // Only reset if it's not already 0 to avoid unnecessary assignments
+            if (mesh.morphTargetInfluences![index] !== 0) {
+               mesh.morphTargetInfluences![index] = 0; // Reset directly
+               console.log(` -> Reset ${targetName} (index ${index}) to 0`);
             }
           }
         });
       }
     });
+    // --- MODIFICATION END ---
     
-    // Update the UI state
+    // Update the UI state (keep this part)
     const newTargets = { ...morphTargets };
     Object.keys(newTargets).forEach(key => {
       newTargets[key] = preset[key] || 0;
     });
     setMorphTargets(newTargets);
     
-    // Notify parent component
+    // Notify parent component (keep this part)
     onMorphTargetsLoaded(newTargets);
-  };
-  
-  // Handle morph target slider change
-  const handleSliderChange = (target: string, value: number) => {
-    setSelectedTarget(target);
-    setCurrentValue(value);
-    
-    console.log(`Setting morph target ${target} to ${value}`);
-    
-    // Apply the change to the actual 3D meshes with animation
-    morphMeshes.forEach(mesh => {
-      if (mesh.morphTargetDictionary && target in mesh.morphTargetDictionary) {
-        const index = mesh.morphTargetDictionary[target];
-        console.log(`Setting ${target} (index ${index}) to ${value} on mesh ${mesh.name}`);
-        
-        if (mesh.morphTargetInfluences) {
-          // Create an animation for this change
-          const animKey = `${mesh.uuid}_${target}`;
-          const startValue = mesh.morphTargetInfluences[index];
-          
-          currentAnimations.current.set(animKey, {
-            mesh,
-            index,
-            startValue,
-            targetValue: value,
-            startTime: Date.now(),
-            duration: 200 // Faster for direct slider manipulation
-          });
-        }
-      }
-    });
-    
-    // Update the morphTargets state
-    setMorphTargets(prev => ({
-      ...prev,
-      [target]: value
-    }));
   };
   
   // Handle preset click from parent
@@ -1151,25 +1115,33 @@ export default function Scene3D() {
   });
   
   const handleMorphTargetChange = (target: string, value: number) => {
-    console.log(`Scene3D: Setting ${target} to ${value}`);
-    // Update the state (this might still be useful for the UI)
+    console.log(`[Scene3D] Slider change: ${target} to ${value}`);
+    // Update the UI state first (this drives the slider's visual position)
     setMorphTargets(prev => ({
       ...prev,
       [target]: value
     }));
-    
-    // If we have a model ref, apply the change to the model directly
+
+    // Call the ref function to apply the change directly to the model's meshes
     if (modelRef.current) {
       modelRef.current.setMorphTargetValue(target, value);
+    } else {
+       console.warn('[Scene3D] Model ref not available when trying to set morph target value.');
     }
   };
   
   const handlePresetClick = (preset: string) => {
     console.log(`Scene3D: Applying preset: ${preset}`);
     if (modelRef.current) {
+      // --- MODIFICATION START ---
+      // Reset body pose before applying facial expression to avoid interference
+      console.log(`Scene3D: Resetting body pose before applying expression.`);
+      modelRef.current.applyBodyPose('Reset');
+      // --- MODIFICATION END ---
+
       modelRef.current.applyExpression(preset);
     } else {
-      console.warn('Model ref not available');
+      console.warn('Model ref not available when trying to apply preset');
     }
   };
 
