@@ -1266,37 +1266,46 @@ export default function Scene3D() {
 
   // Completely revise the camera setup useEffect to ensure consistent rotation
   useEffect(() => {
-    if (cameraRef.current) {
-      // Set the position directly
-      cameraRef.current.position.set(-0.15, 1.83, 1.04);
+    if (cameraRef.current && orbitControlsRef.current) {
+      const camera = cameraRef.current;
+      const controls = orbitControlsRef.current;
       
-      // Create the rotation matrix from Euler angles (in degrees)
+      // 1. Set Position
+      camera.position.set(-0.15, 1.83, 1.04);
+
+      // 2. Set Rotation via Quaternion
       const rotX = THREE.MathUtils.degToRad(-17.89);
       const rotY = THREE.MathUtils.degToRad(-22.75);
       const rotZ = THREE.MathUtils.degToRad(-7.12);
-      
-      // Apply rotation using quaternion for more stability
       const quaternion = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
       );
-      cameraRef.current.quaternion.copy(quaternion);
+      camera.quaternion.copy(quaternion);
       
-      // Force camera to update its matrix
-      cameraRef.current.updateMatrix();
-      cameraRef.current.updateMatrixWorld(true);
+      // 3. Update Camera Matrix
+      camera.updateMatrixWorld(true); // Use updateMatrixWorld
+
+      // 4. Set OrbitControls Target
+      controls.target.set(0, 1, 0); // Set target explicitly
       
-      // Disable controls initially
-      if (orbitControlsRef.current) {
-        orbitControlsRef.current.enabled = false;
-        // Update target to match the camera's look direction
-        orbitControlsRef.current.target.set(0, 1, 0);
-        orbitControlsRef.current.update();
-      }
+      // 5. Update Controls
+      controls.update();
       
+      // 6. Disable Controls slightly later
+      const timer = setTimeout(() => {
+         if (orbitControlsRef.current) { // Check ref again inside timeout
+           orbitControlsRef.current.enabled = false;
+           console.log('OrbitControls disabled after slight delay.');
+         }
+      }, 10); // Small delay (10ms)
+
       console.log('Camera initialized with fixed position:', [-0.15, 1.83, 1.04]);
       console.log('Camera initialized with fixed rotation:', [-17.89, -22.75, -7.12]);
+      
+      // Cleanup timeout on unmount
+      return () => clearTimeout(timer);
     }
-  }, []);
+  }, []); // Keep dependency array empty
   
   return (
     <div className="relative w-full h-screen">
@@ -1304,7 +1313,6 @@ export default function Scene3D() {
         <Suspense fallback={null}>
           <PerspectiveCamera 
             makeDefault 
-            position={[-0.15, 1.83, 1.04]} 
             fov={50} 
             ref={cameraRef}
           />
@@ -1328,7 +1336,6 @@ export default function Scene3D() {
             target={[0, 1, 0]} 
             enableDamping={true}
             dampingFactor={0.25}
-            enabled={false} // Disabled by default
           />
           <Environment preset="sunset" />
         </Suspense>
