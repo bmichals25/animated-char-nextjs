@@ -1099,57 +1099,69 @@ function ControlPanel({
 }
 
 export default function Scene3D() {
+  // --- Refs ---
+  const modelRef = useRef<ModelRef>(null);
+  const orbitControlsRef = useRef<any>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+  // Use a ref flag for one-time setup to avoid StrictMode issues
+  const initialSetupDone = useRef(false);
+
+  // --- State ---
   const [morphTargets, setMorphTargets] = useState<Expression>({});
   const [showControls, setShowControls] = useState<boolean>(true);
   const [animationsLoaded, setAnimationsLoaded] = useState<boolean>(false);
-  console.log(`[Scene3D Render] animationsLoaded state: ${animationsLoaded}`); // Log state on render
-  const modelRef = useRef<ModelRef>(null);
-  
-  // Add camera logging state
+  // State for *displaying* camera info - updated ONLY by logCameraPosition
   const [cameraInfo, setCameraInfo] = useState<{position: [number, number, number], rotation: [number, number, number]}>({
-    position: [-0.15, 1.83, 1.04],
-    rotation: [-17.89, -22.75, -7.12]
+    position: [-0.18, 1.73, 1.2],
+    rotation: [-11.36, -22.22, -4.35]
   });
   const [showCameraInfo, setShowCameraInfo] = useState<boolean>(false);
-  const orbitControlsRef = useRef<any>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
-  
-  // Function to log current camera info
+  const [boneControls, setBoneControls] = useState<AllBoneControls>({ 
+    'CC_Base_Head': { rotation: [0, 0, 0] },
+    'CC_Base_L_Upperarm': { rotation: [0, 0, 0] },
+    'CC_Base_R_Upperarm': { rotation: [0, 0, 0] },
+    'CC_Base_Spine02': { rotation: [0, 0, 0] },
+  });
+
+  console.log(`[Scene3D Render]`);
+
+  // --- Callbacks ---
   const logCameraPosition = useCallback(() => {
+    // This function NOW reads the *actual* current camera state
     if (cameraRef.current) {
       const camera = cameraRef.current;
-      const position: [number, number, number] = [
+      const pos: [number, number, number] = [
         parseFloat(camera.position.x.toFixed(2)),
         parseFloat(camera.position.y.toFixed(2)),
         parseFloat(camera.position.z.toFixed(2))
-      ];
-      
-      // Convert quaternion to Euler angles (in degrees) with explicit XYZ order
+       ];
       const euler = new THREE.Euler(0, 0, 0, 'XYZ').setFromQuaternion(camera.quaternion);
-      const rotation: [number, number, number] = [
+      const rot: [number, number, number] = [
         parseFloat(THREE.MathUtils.radToDeg(euler.x).toFixed(2)),
         parseFloat(THREE.MathUtils.radToDeg(euler.y).toFixed(2)),
         parseFloat(THREE.MathUtils.radToDeg(euler.z).toFixed(2))
-      ];
-      
-      console.log('Camera Position:', position);
-      console.log('Camera Rotation (degrees):', rotation);
-      console.log('Euler order:', euler.order);
-      
-      setCameraInfo({ position, rotation });
+       ];
+      console.log('Current Camera Position:', pos);
+      console.log('Current Camera Rotation (degrees):', rot);
+      setCameraInfo({ position: pos, rotation: rot }); // Update state with ACTUAL values
       setShowCameraInfo(true);
     }
   }, []);
   
-  // Function to lock camera to current position
   const lockCamera = useCallback(() => {
     if (orbitControlsRef.current) {
       orbitControlsRef.current.enabled = false;
-      console.log('Camera locked at:', cameraInfo.position, cameraInfo.rotation);
+      // Log the ACTUAL current state when locking
+      if (cameraRef.current) {
+        const cam = cameraRef.current;
+        const pos: [number, number, number] = [cam.position.x, cam.position.y, cam.position.z];
+        const euler = new THREE.Euler(0,0,0,'XYZ').setFromQuaternion(cam.quaternion);
+        const rotDeg: [number, number, number] = [THREE.MathUtils.radToDeg(euler.x), THREE.MathUtils.radToDeg(euler.y), THREE.MathUtils.radToDeg(euler.z)];
+        console.log('Camera locked at ACTUAL Pos:', pos, 'Rot:', rotDeg);
+      }
     }
-  }, [cameraInfo]);
+  }, []);
   
-  // Function to unlock camera
   const unlockCamera = useCallback(() => {
     if (orbitControlsRef.current) {
       orbitControlsRef.current.enabled = true;
@@ -1157,249 +1169,163 @@ export default function Scene3D() {
     }
   }, []);
   
-  // Add this to get manual control over camera position
-  const setCameraPosition = useCallback((pos: [number, number, number]) => {
-    if (cameraRef.current) {
-      cameraRef.current.position.set(pos[0], pos[1], pos[2]);
-      if (orbitControlsRef.current) {
-        // Update orbit controls target if needed
-        // orbitControlsRef.current.target.set(0, 1, 0);
-        orbitControlsRef.current.update();
-      }
-    }
-  }, []);
-  
-  // State for bone controls
-  const [boneControls, setBoneControls] = useState<AllBoneControls>({
-    // Initialize with default rotations (0, 0, 0) for the bones we control
-    'CC_Base_Head': { rotation: [0, 0, 0] },
-    'CC_Base_L_Upperarm': { rotation: [0, 0, 0] },
-    'CC_Base_R_Upperarm': { rotation: [0, 0, 0] },
-    'CC_Base_Spine02': { rotation: [0, 0, 0] },
-  });
-  
-  const handleMorphTargetChange = (target: string, value: number) => {
+  const handleMorphTargetChange = (target: string, value: number) => { 
     console.log(`[Scene3D] Slider change: ${target} to ${value}`);
-    // Update the UI state first (this drives the slider's visual position)
-    setMorphTargets(prev => ({
-      ...prev,
-      [target]: value
-    }));
-
-    // Call the ref function to apply the change directly to the model's meshes
-    if (modelRef.current) {
-      modelRef.current.setMorphTargetValue(target, value);
-    } else {
-       console.warn('[Scene3D] Model ref not available when trying to set morph target value.');
-    }
+    setMorphTargets(prev => ({ ...prev, [target]: value }));
+    if (modelRef.current) { modelRef.current.setMorphTargetValue(target, value); }
+    else { console.warn('[Scene3D] Model ref not available for morph target change.'); }
   };
   
-  const handlePresetClick = (preset: string) => {
+  const handlePresetClick = (preset: string) => { 
     console.log(`Scene3D: Applying preset: ${preset}`);
     if (modelRef.current) {
-      // --- MODIFICATION START ---
-      // Reset body pose before applying facial expression to avoid interference
       console.log(`Scene3D: Resetting body pose before applying expression.`);
       modelRef.current.applyBodyPose('Reset');
-      // --- MODIFICATION END ---
-
       modelRef.current.applyExpression(preset);
-    } else {
-      console.warn('Model ref not available when trying to apply preset');
-    }
+    } else { console.warn('Model ref not available for preset click.'); }
   };
-
-  // Handler for body pose click
-  const handleBodyPoseClick = (presetName: string) => {
+  
+  const handleBodyPoseClick = (presetName: string) => { 
     console.log(`Scene3D: Applying body pose preset: ${presetName}`);
     if (modelRef.current) {
       modelRef.current.applyBodyPose(presetName);
-      // Optionally update the UI state to reflect the preset
       const preset = BODY_POSE_PRESETS[presetName];
       if (preset) {
         setBoneControls(prev => {
           const newState = { ...prev };
           Object.entries(preset).forEach(([boneName, rotation]) => {
-            if (newState[boneName]) {
-              newState[boneName] = { rotation };
-            }
+            if (newState[boneName]) { newState[boneName] = { rotation }; }
           });
           return newState;
         });
       }
-    } else {
-      console.warn('Model ref not available for body pose.');
-    }
+    } else { console.warn('Model ref not available for body pose.'); }
   };
-
-  // Handler for bone rotation changes
-  const handleBoneRotationChange = (boneName: string, axis: 'x' | 'y' | 'z', value: number) => {
-    console.log(`[Scene3D] handleBoneRotationChange called for ${boneName}, axis ${axis}, value ${value}`); // Log handler call
+  
+  const handleBoneRotationChange = (boneName: string, axis: 'x' | 'y' | 'z', value: number) => { 
+    console.log(`[Scene3D] handleBoneRotationChange: ${boneName}, axis ${axis}, value ${value}`);
     const newRotation = [...boneControls[boneName].rotation] as [number, number, number];
     const axisIndex = { x: 0, y: 1, z: 2 }[axis];
     newRotation[axisIndex] = value;
-
-    // Update state for the UI
-    console.log(`[Scene3D] New rotation calculated: ${JSON.stringify(newRotation)} for ${boneName}`); // Log the calculated rotation
-    setBoneControls(prev => ({
-      ...prev,
-      [boneName]: { rotation: newRotation },
-    }));
-
-    // Apply rotation to the model via ref
-    if (modelRef.current) {
-      modelRef.current.setBoneRotation(boneName, newRotation);
-    }
+    setBoneControls(prev => ({ ...prev, [boneName]: { rotation: newRotation }, }));
+    if (modelRef.current) { modelRef.current.setBoneRotation(boneName, newRotation); }
+    else { console.warn('Model ref not available for bone rotation change.'); }
   };
-
-  // Handler for animation button click
-  const handleAnimationClick = (clipName: string) => {
+  
+  const handleAnimationClick = (clipName: string) => { 
     console.log(`Scene3D: Playing animation: ${clipName}`);
     if (modelRef.current) {
-      // Add log before playing
       console.log(`[Scene3D] Calling modelRef.current.playAnimation('${clipName}')`);
       modelRef.current.playAnimation(clipName);
-    } else {
-      console.warn('Model ref not available for animation.');
-    }
+    } else { console.warn('Model ref not available for animation.'); }
   };
 
-  // Completely revise the camera setup useEffect to ensure consistent rotation
+  // --- Effects ---
   useEffect(() => {
-    if (cameraRef.current && orbitControlsRef.current) {
+    // Check refs and the one-time setup flag
+    if (!initialSetupDone.current && cameraRef.current && orbitControlsRef.current) {
       const camera = cameraRef.current;
       const controls = orbitControlsRef.current;
-      
-      // 1. Set Position
-      camera.position.set(-0.15, 1.83, 1.04);
 
-      // 2. Set Rotation via Quaternion
-      const rotX = THREE.MathUtils.degToRad(-17.89);
-      const rotY = THREE.MathUtils.degToRad(-22.75);
-      const rotZ = THREE.MathUtils.degToRad(-7.12);
+      console.log('[useEffect] Applying initial camera state...');
+
+      // Define target state explicitly
+      const targetPosition: [number, number, number] = [-0.18, 1.73, 1.2];
+      const targetRotationDeg: [number, number, number] = [-11.36, -22.22, -4.35];
+
+      // 1. Set Position & Rotation directly on the Three.js objects
+      camera.position.set(...targetPosition);
+      const rotX = THREE.MathUtils.degToRad(targetRotationDeg[0]);
+      const rotY = THREE.MathUtils.degToRad(targetRotationDeg[1]);
+      const rotZ = THREE.MathUtils.degToRad(targetRotationDeg[2]);
       const quaternion = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(rotX, rotY, rotZ, 'XYZ')
       );
       camera.quaternion.copy(quaternion);
-      
-      // 3. Update Camera Matrix
-      camera.updateMatrixWorld(true); // Use updateMatrixWorld
 
-      // 4. Set OrbitControls Target
-      controls.target.set(0, 1, 0); // Set target explicitly
-      
-      // 5. Update Controls
+      // 2. Update Camera Matrices
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true); // Force update world matrix
+
+      // 3. Configure OrbitControls
+      controls.target.set(0, 1.0, 0); // Set the point camera looks at
+      controls.enabled = false; // Disable controls initially
+
+      // 4. CRITICAL: Update OrbitControls internal state AFTER setting camera state
       controls.update();
-      
-      // 6. Disable Controls slightly later
-      const timer = setTimeout(() => {
-         if (orbitControlsRef.current) { // Check ref again inside timeout
-           orbitControlsRef.current.enabled = false;
-           console.log('OrbitControls disabled after slight delay.');
-         }
-      }, 10); // Small delay (10ms)
 
-      console.log('Camera initialized with fixed position:', [-0.15, 1.83, 1.04]);
-      console.log('Camera initialized with fixed rotation:', [-17.89, -22.75, -7.12]);
-      
-      // Cleanup timeout on unmount
-      return () => clearTimeout(timer);
+      // 5. Mark setup as done using the ref flag
+      initialSetupDone.current = true;
+
+      console.log('[useEffect] Initial camera setup attempt complete.');
+      console.log('   Attempted Position:', targetPosition);
+      console.log('   Attempted Rotation (deg):', targetRotationDeg);
+      // Note: We don't setCameraInfo here. Log button reads actual state.
     }
-  }, []); // Keep dependency array empty
-  
+  }, []);
+
+  // --- Render ---
   return (
     <div className="relative w-full h-screen">
       <Canvas shadows>
         <Suspense fallback={null}>
-          <PerspectiveCamera 
-            makeDefault 
-            fov={50} 
+          <PerspectiveCamera
+            makeDefault
+            // NO initial position/rotation props here
+            fov={50}
             ref={cameraRef}
           />
           <ambientLight intensity={0.5} />
           <directionalLight position={[5, 5, 5]} intensity={1.5} castShadow />
           <Model
             ref={modelRef}
-            onMorphTargetsLoaded={(targets) => {
-              console.log('Morph targets loaded in Scene3D:', targets);
-              setMorphTargets(targets);
-              setShowControls(true);
-            }}
-            onAnimationsLoaded={() => {
-              console.log('[Scene3D] Received onAnimationsLoaded callback');
-              setAnimationsLoaded(true);
-            }}
-            animationsLoaded={animationsLoaded} // Pass state down
+            onMorphTargetsLoaded={(targets) => { setMorphTargets(targets); setShowControls(true); }}
+            onAnimationsLoaded={() => { setAnimationsLoaded(true); }}
+            animationsLoaded={animationsLoaded}
           />
-          <OrbitControls 
-            ref={orbitControlsRef} 
-            target={[0, 1, 0]} 
+          <OrbitControls
+            ref={orbitControlsRef}
+            target={[0, 1.0, 0]} // Target hint matches setup
             enableDamping={true}
             dampingFactor={0.25}
+            // enabled state is controlled by useEffect and lock/unlock buttons
           />
           <Environment preset="sunset" />
         </Suspense>
       </Canvas>
-      
-      {/* Camera Info Panel */}
-      <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg">
-        <button 
-          onClick={logCameraPosition}
-          className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2"
-        >
-          Log Camera Position
-        </button>
-        
-        <div className="flex space-x-2">
-          <button 
-            onClick={lockCamera}
-            className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
-          >
-            Lock
-          </button>
-          
-          <button 
-            onClick={unlockCamera}
-            className="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
-          >
-            Unlock
-          </button>
-        </div>
-        
-        {showCameraInfo && (
-          <div className="mt-2 text-xs">
-            <p className="font-semibold">Position:</p>
-            <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
-            <p className="font-semibold mt-1">Rotation (deg):</p>
-            <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
-            
-            <button 
-              onClick={() => {
-                console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
-                navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
-                  .then(() => alert('Camera info copied to clipboard!'))
-                  .catch(err => console.error('Could not copy text: ', err));
-              }}
-              className="mt-2 px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600"
-            >
-              Copy JSON
-            </button>
-          </div>
-        )}
-      </div>
-      
-      {showControls && (
-        <ControlPanel
-          targets={morphTargets}
-          onChange={handleMorphTargetChange}
-          onPresetClick={handlePresetClick}
-          boneControls={boneControls}
-          onBoneRotationChange={handleBoneRotationChange}
-          onBodyPoseClick={handleBodyPoseClick}
-          onAnimationClick={handleAnimationClick}
-          animationsLoaded={animationsLoaded}
-        />
-      )}
+
+       {/* UI Panels */}
+       <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg">
+         <button onClick={logCameraPosition} className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2">Log Camera Position</button>
+         <div className="flex space-x-2">
+           <button onClick={lockCamera} className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">Lock</button>
+           <button onClick={unlockCamera} className="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">Unlock</button>
+         </div>
+         {showCameraInfo && (
+            <div className="mt-2 text-xs">
+                <p className="font-semibold">Position:</p>
+                <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
+                <p className="font-semibold mt-1">Rotation (deg):</p>
+                <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
+                <button onClick={() => { 
+                    console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
+                    navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
+                    .then(() => alert('Camera info copied to clipboard!'))
+                    .catch(err => console.error('Could not copy text: ', err));
+                 }} className="mt-2 px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">Copy JSON</button>
+            </div>
+         )}
+       </div>
+       {showControls && ( <ControlPanel 
+             targets={morphTargets}
+             onChange={handleMorphTargetChange}
+             onPresetClick={handlePresetClick}
+             boneControls={boneControls}
+             onBoneRotationChange={handleBoneRotationChange}
+             onBodyPoseClick={handleBodyPoseClick}
+             onAnimationClick={handleAnimationClick}
+             animationsLoaded={animationsLoaded}
+        /> )}
     </div>
   );
 } 
