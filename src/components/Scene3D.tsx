@@ -1124,8 +1124,8 @@ export default function Scene3D() {
         parseFloat(camera.position.z.toFixed(2))
       ];
       
-      // Convert quaternion to Euler angles (in degrees)
-      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion);
+      // Convert quaternion to Euler angles (in degrees) with explicit XYZ order
+      const euler = new THREE.Euler(0, 0, 0, 'XYZ').setFromQuaternion(camera.quaternion);
       const rotation: [number, number, number] = [
         parseFloat(THREE.MathUtils.radToDeg(euler.x).toFixed(2)),
         parseFloat(THREE.MathUtils.radToDeg(euler.y).toFixed(2)),
@@ -1134,6 +1134,7 @@ export default function Scene3D() {
       
       console.log('Camera Position:', position);
       console.log('Camera Rotation (degrees):', rotation);
+      console.log('Euler order:', euler.order);
       
       setCameraInfo({ position, rotation });
       setShowCameraInfo(true);
@@ -1263,6 +1264,36 @@ export default function Scene3D() {
     }
   };
 
+  // Add a useEffect to set up the camera correctly after it's created
+  useEffect(() => {
+    if (cameraRef.current) {
+      // Set the position directly
+      cameraRef.current.position.set(-0.15, 1.74, 1.15);
+      
+      // Create a dummy target point
+      const targetPosition = new THREE.Vector3(0, 1, 0);
+      
+      // Apply the rotation by looking at a calculated point
+      // We'll use a matrix to transform the forward vector based on our desired euler angles
+      const euler = new THREE.Euler(
+        THREE.MathUtils.degToRad(-12.2), 
+        THREE.MathUtils.degToRad(-20.83), 
+        THREE.MathUtils.degToRad(-4.4),
+        'XYZ'
+      );
+      
+      // Set the rotation directly using the euler
+      cameraRef.current.rotation.copy(euler);
+      
+      // Disable controls initially
+      if (orbitControlsRef.current) {
+        orbitControlsRef.current.enabled = false;
+      }
+      
+      console.log('Camera initialized with fixed position and rotation');
+    }
+  }, [cameraRef, orbitControlsRef]);
+  
   return (
     <div className="relative w-full h-screen">
       <Canvas shadows>
@@ -1270,7 +1301,6 @@ export default function Scene3D() {
           <PerspectiveCamera 
             makeDefault 
             position={[-0.15, 1.74, 1.15]} 
-            rotation={[THREE.MathUtils.degToRad(-12.2), THREE.MathUtils.degToRad(-20.83), THREE.MathUtils.degToRad(-4.4)]}
             fov={50} 
             ref={cameraRef}
           />
