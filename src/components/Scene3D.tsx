@@ -852,19 +852,6 @@ const Model = forwardRef<ModelRef, {
     }
   }, [onMorphTargetsLoaded, morphTargets]);
   
-  // Add a toggle color sphere for debugging
-  const [sphereColor, setSphereColor] = useState('red');
-  const toggleSphereColor = () => {
-    setSphereColor(prev => prev === 'red' ? 'blue' : 'red');
-  };
-  
-  // Animate the model if needed
-  useFrame((state, delta) => {
-    if (modelRef.current) {
-      // You can add animations here
-    }
-  });
-  
   // Render loading state if model is still loading
   if (modelLoading) {
     return (
@@ -914,12 +901,6 @@ const Model = forwardRef<ModelRef, {
     <>
       <group ref={modelRef}>
         <primitive object={model} />
-        
-        {/* Debug sphere */}
-        <mesh position={[1, 1, 1]} onClick={toggleSphereColor}>
-          <sphereGeometry args={[0.5, 32, 32]} />
-          <meshStandardMaterial color={sphereColor} />
-        </mesh>
       </group>
       
       {/* Simplified Three-Point Lighting */}
@@ -1212,6 +1193,9 @@ export default function Scene3D() {
     rotation: [-11.36, -22.22, -4.35]
   });
   const [showCameraInfo, setShowCameraInfo] = useState<boolean>(false);
+  const [showCameraWindow, setShowCameraWindow] = useState<boolean>(false); // Hidden by default
+  const [showFacialControls, setShowFacialControls] = useState<boolean>(false); // Hidden by default
+  const [showKeyHints, setShowKeyHints] = useState<boolean>(false); // Hide key hints by default
   const [boneControls, setBoneControls] = useState<AllBoneControls>({ 
     'CC_Base_Head': { rotation: [0, 0, 0] },
     'CC_Base_L_Upperarm': { rotation: [0, 0, 0] },
@@ -1483,6 +1467,67 @@ export default function Scene3D() {
     }
   }, []);
 
+  // Add keyboard event listeners for F8 and F9
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // F8 toggles camera window
+      if (e.key === 'F8') {
+        e.preventDefault(); // Prevent default browser action
+        setShowCameraWindow(prev => !prev);
+        console.log('[Scene3D] Camera window toggled:', !showCameraWindow);
+      }
+      
+      // F9 toggles facial controls
+      if (e.key === 'F9') {
+        e.preventDefault(); // Prevent default browser action
+        setShowFacialControls(prev => !prev);
+        console.log('[Scene3D] Facial controls toggled:', !showFacialControls);
+      }
+    };
+    
+    // Add event listener
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showCameraWindow, showFacialControls]);
+
+  // Add event listeners for fn key to show/hide key hints
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Use Alt key (Option on Mac) as it's more reliably detectable across platforms
+      if (e.altKey) {
+        setShowKeyHints(true);
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // When Alt key is released, hide hints
+      if (!e.altKey) {
+        setShowKeyHints(false);
+      }
+    };
+    
+    // Also handle document visibility to ensure hints don't stay visible
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setShowKeyHints(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   return (
     <div className="relative w-full h-screen">
       <Canvas 
@@ -1532,70 +1577,81 @@ export default function Scene3D() {
         </Suspense>
       </Canvas>
 
-      <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg w-64 z-10">
-        <h3 className="text-sm font-semibold mb-2 text-black">Current Camera</h3>
-        <button onClick={logCameraPosition} className="w-full px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2">Log Current Values</button>
-        <div className="flex space-x-2 mb-2">
-          <button onClick={lockCamera} className="flex-1 px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">Lock Controls</button>
-          <button onClick={unlockCamera} className="flex-1 px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">Unlock Controls</button>
-        </div>
-        {showCameraInfo && ( 
-            <div className="mt-2 text-xs space-y-1">
-                <p className="font-semibold">Position:</p>
-                <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
-                <p className="font-semibold mt-1">Rotation (deg):</p>
-                <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
-                <button onClick={handleUseCurrentForManual} className="mt-2 w-full px-2 py-1 bg-teal-500 text-white text-xs rounded hover:bg-teal-600" title="Copies the logged values above into the manual input fields below">Use These Values for Manual Set</button>
-                <button onClick={() => { 
-                    console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
-                    navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
-                    .then(() => alert('Camera info copied to clipboard!'))
-                    .catch(err => console.error('Could not copy text: ', err));
-                 }} className="mt-1 w-full px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">Copy Current JSON</button>
-            </div>
-        )}
-        <div className="mt-4 pt-3 border-t border-gray-300">
-          <h3 className="text-sm font-semibold mb-2 text-black">Manual Camera Set</h3>
-          <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-              <div>
-                  <label className="block font-medium mb-1">Pos X:</label>
-                  <input type="number" step="0.01" value={manualCamPos[0]} onChange={e => setManualCamPos([e.target.value, manualCamPos[1], manualCamPos[2]])} className="w-full p-1 border rounded" />
-              </div>
-              <div>
-                  <label className="block font-medium mb-1">Rot X:</label>
-                  <input type="number" step="0.01" value={manualCamRot[0]} onChange={e => setManualCamRot(prev => [e.target.value, prev[1], prev[2]])} className="w-full p-1 border rounded" />
-              </div>
-               <div>
-                  <label className="block font-medium mb-1">Pos Y:</label>
-                  <input type="number" step="0.01" value={manualCamPos[1]} onChange={e => setManualCamPos([manualCamPos[0], e.target.value, manualCamPos[2]])} className="w-full p-1 border rounded" />
-              </div>
-               <div>
-                  <label className="block font-medium mb-1">Rot Y:</label>
-                  <input type="number" step="0.01" value={manualCamRot[1]} onChange={e => setManualCamRot(prev => [prev[0], e.target.value, prev[2]])} className="w-full p-1 border rounded" />
-              </div>
-               <div>
-                  <label className="block font-medium mb-1">Pos Z:</label>
-                  <input type="number" step="0.01" value={manualCamPos[2]} onChange={e => setManualCamPos([manualCamPos[0], manualCamPos[1], e.target.value])} className="w-full p-1 border rounded" />
-              </div>
-               <div>
-                  <label className="block font-medium mb-1">Rot Z:</label>
-                  <input type="number" step="0.01" value={manualCamRot[2]} onChange={e => setManualCamRot(prev => [prev[0], prev[1], e.target.value])} className="w-full p-1 border rounded" />
-              </div>
+      {showCameraWindow && (
+        <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg w-64 z-10">
+          <h3 className="text-sm font-semibold mb-2 text-black">Current Camera</h3>
+          <button onClick={logCameraPosition} className="w-full px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2">Log Current Values</button>
+          <div className="flex space-x-2 mb-2">
+            <button onClick={lockCamera} className="flex-1 px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">Lock Controls</button>
+            <button onClick={unlockCamera} className="flex-1 px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">Unlock Controls</button>
           </div>
-          <button onClick={handleApplyManualCamera} className="w-full px-3 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600">Apply Manual Transform</button>
+          {showCameraInfo && ( 
+              <div className="mt-2 text-xs space-y-1">
+                  <p className="font-semibold">Position:</p>
+                  <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
+                  <p className="font-semibold mt-1">Rotation (deg):</p>
+                  <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
+                  <button onClick={handleUseCurrentForManual} className="mt-2 w-full px-2 py-1 bg-teal-500 text-white text-xs rounded hover:bg-teal-600" title="Copies the logged values above into the manual input fields below">Use These Values for Manual Set</button>
+                  <button onClick={() => { 
+                      console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
+                      navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
+                      .then(() => alert('Camera info copied to clipboard!'))
+                      .catch(err => console.error('Could not copy text: ', err));
+                   }} className="mt-1 w-full px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">Copy Current JSON</button>
+              </div>
+          )}
+          <div className="mt-4 pt-3 border-t border-gray-300">
+            <h3 className="text-sm font-semibold mb-2 text-black">Manual Camera Set</h3>
+            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                <div>
+                    <label className="block font-medium mb-1">Pos X:</label>
+                    <input type="number" step="0.01" value={manualCamPos[0]} onChange={e => setManualCamPos([e.target.value, manualCamPos[1], manualCamPos[2]])} className="w-full p-1 border rounded" />
+                </div>
+                <div>
+                    <label className="block font-medium mb-1">Rot X:</label>
+                    <input type="number" step="0.01" value={manualCamRot[0]} onChange={e => setManualCamRot(prev => [e.target.value, prev[1], prev[2]])} className="w-full p-1 border rounded" />
+                </div>
+                 <div>
+                    <label className="block font-medium mb-1">Pos Y:</label>
+                    <input type="number" step="0.01" value={manualCamPos[1]} onChange={e => setManualCamPos([manualCamPos[0], e.target.value, manualCamPos[2]])} className="w-full p-1 border rounded" />
+                </div>
+                 <div>
+                    <label className="block font-medium mb-1">Rot Y:</label>
+                    <input type="number" step="0.01" value={manualCamRot[1]} onChange={e => setManualCamRot(prev => [prev[0], e.target.value, prev[2]])} className="w-full p-1 border rounded" />
+                </div>
+                 <div>
+                    <label className="block font-medium mb-1">Pos Z:</label>
+                    <input type="number" step="0.01" value={manualCamPos[2]} onChange={e => setManualCamPos([manualCamPos[0], manualCamPos[1], e.target.value])} className="w-full p-1 border rounded" />
+                </div>
+                 <div>
+                    <label className="block font-medium mb-1">Rot Z:</label>
+                    <input type="number" step="0.01" value={manualCamRot[2]} onChange={e => setManualCamRot(prev => [prev[0], prev[1], e.target.value])} className="w-full p-1 border rounded" />
+                </div>
+            </div>
+            <button onClick={handleApplyManualCamera} className="w-full px-3 py-1 bg-orange-500 text-white text-xs font-semibold rounded hover:bg-orange-600">Apply Manual Transform</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {showControls && ( <ControlPanel 
-            targets={morphTargets}
-            onChange={handleMorphTargetChange}
-            onPresetClick={handlePresetClick}
-            boneControls={boneControls}
-            onBoneRotationChange={handleBoneRotationChange}
-            onBodyPoseClick={handleBodyPoseClick}
-            onAnimationClick={handleAnimationClick}
-            animationsLoaded={animationsLoaded}
-       /> )}
+      {showControls && showFacialControls && ( 
+        <ControlPanel 
+          targets={morphTargets}
+          onChange={handleMorphTargetChange}
+          onPresetClick={handlePresetClick}
+          boneControls={boneControls}
+          onBoneRotationChange={handleBoneRotationChange}
+          onBodyPoseClick={handleBodyPoseClick}
+          onAnimationClick={handleAnimationClick}
+          animationsLoaded={animationsLoaded}
+        /> 
+      )}
+      
+      {/* Keyboard shortcut info - only visible when Alt key is pressed */}
+      {showKeyHints && (
+        <div className="absolute top-2 left-2 bg-black/60 text-white text-xs p-2 rounded">
+          Hold Alt for hints | F8: Toggle Camera Window | F9: Toggle Facial Controls
+        </div>
+      )}
     </div>
   );
 } 
