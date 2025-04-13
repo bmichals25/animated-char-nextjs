@@ -2,7 +2,7 @@
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, PerspectiveCamera, Plane, Text, MeshReflectorMaterial } from '@react-three/drei';
-import { Suspense, useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import { Suspense, useEffect, useState, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { AnimationUtils } from 'three';
@@ -1105,6 +1105,69 @@ export default function Scene3D() {
   console.log(`[Scene3D Render] animationsLoaded state: ${animationsLoaded}`); // Log state on render
   const modelRef = useRef<ModelRef>(null);
   
+  // Add camera logging state
+  const [cameraInfo, setCameraInfo] = useState<{position: [number, number, number], rotation: [number, number, number]}>({
+    position: [0, 1.5, 5],
+    rotation: [0, 0, 0]
+  });
+  const [showCameraInfo, setShowCameraInfo] = useState<boolean>(false);
+  const orbitControlsRef = useRef<any>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+  
+  // Function to log current camera info
+  const logCameraPosition = useCallback(() => {
+    if (cameraRef.current) {
+      const camera = cameraRef.current;
+      const position: [number, number, number] = [
+        parseFloat(camera.position.x.toFixed(2)),
+        parseFloat(camera.position.y.toFixed(2)),
+        parseFloat(camera.position.z.toFixed(2))
+      ];
+      
+      // Convert quaternion to Euler angles (in degrees)
+      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion);
+      const rotation: [number, number, number] = [
+        parseFloat(THREE.MathUtils.radToDeg(euler.x).toFixed(2)),
+        parseFloat(THREE.MathUtils.radToDeg(euler.y).toFixed(2)),
+        parseFloat(THREE.MathUtils.radToDeg(euler.z).toFixed(2))
+      ];
+      
+      console.log('Camera Position:', position);
+      console.log('Camera Rotation (degrees):', rotation);
+      
+      setCameraInfo({ position, rotation });
+      setShowCameraInfo(true);
+    }
+  }, []);
+  
+  // Function to lock camera to current position
+  const lockCamera = useCallback(() => {
+    if (orbitControlsRef.current) {
+      orbitControlsRef.current.enabled = false;
+      console.log('Camera locked at:', cameraInfo.position, cameraInfo.rotation);
+    }
+  }, [cameraInfo]);
+  
+  // Function to unlock camera
+  const unlockCamera = useCallback(() => {
+    if (orbitControlsRef.current) {
+      orbitControlsRef.current.enabled = true;
+      console.log('Camera unlocked');
+    }
+  }, []);
+  
+  // Add this to get manual control over camera position
+  const setCameraPosition = useCallback((pos: [number, number, number]) => {
+    if (cameraRef.current) {
+      cameraRef.current.position.set(pos[0], pos[1], pos[2]);
+      if (orbitControlsRef.current) {
+        // Update orbit controls target if needed
+        // orbitControlsRef.current.target.set(0, 1, 0);
+        orbitControlsRef.current.update();
+      }
+    }
+  }, []);
+  
   // State for bone controls
   const [boneControls, setBoneControls] = useState<AllBoneControls>({
     // Initialize with default rotations (0, 0, 0) for the bones we control
@@ -1201,28 +1264,90 @@ export default function Scene3D() {
   };
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-screen">
       <Canvas shadows>
-        <PerspectiveCamera makeDefault position={[0, 1, 5]} />
-        <OrbitControls />
         <Suspense fallback={null}>
-          <Model 
-            onMorphTargetsLoaded={setMorphTargets}
-            onPresetClick={handlePresetClick}
-            onAnimationsLoaded={() => { 
-              console.log('[Scene3D] onAnimationsLoaded callback triggered!'); // Log callback
-              setAnimationsLoaded(true); 
-            }}
-            animationsLoaded={animationsLoaded}
-            ref={modelRef}
+          <PerspectiveCamera 
+            makeDefault 
+            position={[0, 1.5, 5]} 
+            fov={50} 
+            ref={cameraRef}
           />
-          <Environment preset="apartment" />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[5, 5, 5]} intensity={1.5} castShadow />
+          <Model
+            ref={modelRef}
+            onMorphTargetsLoaded={(targets) => {
+              console.log('Morph targets loaded in Scene3D:', targets);
+              setMorphTargets(targets);
+              setShowControls(true);
+            }}
+            onAnimationsLoaded={() => {
+              console.log('[Scene3D] Received onAnimationsLoaded callback');
+              setAnimationsLoaded(true);
+            }}
+            animationsLoaded={animationsLoaded} // Pass state down
+          />
+          <OrbitControls 
+            ref={orbitControlsRef} 
+            target={[0, 1, 0]} 
+            enableDamping={true}
+            dampingFactor={0.25}
+          />
+          <Environment preset="sunset" />
         </Suspense>
       </Canvas>
       
+      {/* Camera Info Panel */}
+      <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-3 rounded-lg shadow-lg">
+        <button 
+          onClick={logCameraPosition}
+          className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 mb-2"
+        >
+          Log Camera Position
+        </button>
+        
+        <div className="flex space-x-2">
+          <button 
+            onClick={lockCamera}
+            className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600"
+          >
+            Lock
+          </button>
+          
+          <button 
+            onClick={unlockCamera}
+            className="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600"
+          >
+            Unlock
+          </button>
+        </div>
+        
+        {showCameraInfo && (
+          <div className="mt-2 text-xs">
+            <p className="font-semibold">Position:</p>
+            <p>X: {cameraInfo.position[0]}, Y: {cameraInfo.position[1]}, Z: {cameraInfo.position[2]}</p>
+            <p className="font-semibold mt-1">Rotation (deg):</p>
+            <p>X: {cameraInfo.rotation[0]}, Y: {cameraInfo.rotation[1]}, Z: {cameraInfo.rotation[2]}</p>
+            
+            <button 
+              onClick={() => {
+                console.log('Copy to clipboard:', JSON.stringify(cameraInfo, null, 2));
+                navigator.clipboard.writeText(JSON.stringify(cameraInfo, null, 2))
+                  .then(() => alert('Camera info copied to clipboard!'))
+                  .catch(err => console.error('Could not copy text: ', err));
+              }}
+              className="mt-2 px-2 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600"
+            >
+              Copy JSON
+            </button>
+          </div>
+        )}
+      </div>
+      
       {showControls && (
-        <ControlPanel 
-          targets={morphTargets} 
+        <ControlPanel
+          targets={morphTargets}
           onChange={handleMorphTargetChange}
           onPresetClick={handlePresetClick}
           boneControls={boneControls}
