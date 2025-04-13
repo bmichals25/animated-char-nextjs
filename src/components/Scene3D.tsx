@@ -324,16 +324,47 @@ const Model = forwardRef<ModelRef, {
       return;
     }
     console.log(`[Model] Playing animation: ${clipName}`);
-    // Ensure looping for idle, non-looping for talk (adjust if needed)
+    // Ensure looping for idle, non-looping for other animations
     const loopMode = clipName === 'idle' ? THREE.LoopRepeat : THREE.LoopOnce;
 
-    currentAction.current?.fadeOut(0.3); // Faster fade
+    // Fade out current animation if any
+    if (currentAction.current) {
+      currentAction.current.fadeOut(0.3);
+    }
+    
+    // Create and configure the new action
     const action = mixer.current.clipAction(clip);
-    action.setLoop(loopMode, Infinity); // Set loop mode
+    action.setLoop(loopMode, Infinity);
+    
+    // For non-idle animations, configure to hold last frame and return to idle when complete
     if (loopMode === THREE.LoopOnce) {
       action.clampWhenFinished = true; // Hold last frame for non-looping anims
+      
+      // Set up event to return to idle animation when finished
+      if (clipName !== 'idle') {
+        // Define what happens when a non-idle animation finishes
+        const onNonIdleAnimationFinished = (e: any) => {
+          if (e.action === action) {
+            console.log(`[Animation] '${clipName}' finished, returning to idle`);
+            // Small delay before returning to idle for natural transition
+            setTimeout(() => {
+              playAnimationLocal('idle');
+            }, 300);
+            // Remove this listener after it's triggered
+            mixer.current?.removeEventListener('finished', onNonIdleAnimationFinished);
+          }
+        };
+        
+        // Remove any existing finished event listeners
+        mixer.current.removeEventListener('finished', onNonIdleAnimationFinished);
+        
+        // Add the listener
+        mixer.current.addEventListener('finished', onNonIdleAnimationFinished);
+      }
     }
-    action.reset().fadeIn(0.3).play(); // Faster fade
+    
+    // Play the new animation with a fade in
+    action.reset().fadeIn(0.3).play();
     currentAction.current = action;
   };
 
@@ -435,6 +466,11 @@ const Model = forwardRef<ModelRef, {
         console.log('FBX model loaded successfully:', fbx);
         // Initialize Animation Mixer
         mixer.current = new THREE.AnimationMixer(fbx);
+        
+        // Setup mixer event listeners
+        mixer.current.addEventListener('finished', (e) => {
+          console.log('[Animation] Event finished:', e);
+        });
 
         setModel(fbx);
         setModelLoading(false);
@@ -779,18 +815,28 @@ const Model = forwardRef<ModelRef, {
       if (animationRef.current !== null) {
         cancelAnimationFrame(animationRef.current);
       }
+      
+      // Clean up mixer on unmount
+      if (mixer.current) {
+        mixer.current.stopAllAction();
+      }
     };
   }, []);
   
-  // Effect to auto-play idle animation once model and clips are loaded
+  // Check if animations are loaded and start idle animation if appropriate
   useEffect(() => {
-    // Only run when model AND animations are loaded
-    if (modelLoaded && animationClips.current.has('idle') && !currentAction.current) {
-      console.log('[Effect] Auto-playing idle animation.');
-      // Call the function directly, no need for ref here
-      playAnimationLocal('idle');
+    if (animationsLoaded && !currentAction.current) {
+      const idleClip = animationClips.current.get('idle');
+      if (idleClip && mixer.current) {
+        console.log('[Model] Starting idle animation automatically after animations loaded');
+        const action = mixer.current.clipAction(idleClip);
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+        currentAction.current = action;
+        onAnimationsLoaded(); // Signal to parent that animations are ready
+      }
     }
-  }, [modelLoaded]);
+  }, [animationsLoaded, onAnimationsLoaded]);
   
   // Apply a preset expression
   const applyExpression = (presetName: string) => {
@@ -1184,6 +1230,7 @@ export default function Scene3D() {
   const defaultTargetPosition = useRef<[number, number, number]>([-0.18, 1.73, 1.2]);
   const defaultTargetRotationDeg = useRef<[number, number, number]>([-11.36, -22.22, -4.35]);
   const initialSetupComplete = useRef<boolean>(false);
+  const idleAnimationStarted = useRef<boolean>(false);
 
   const [morphTargets, setMorphTargets] = useState<Expression>({});
   const [showControls, setShowControls] = useState<boolean>(true);
@@ -1308,11 +1355,25 @@ export default function Scene3D() {
     else { console.warn('Model ref not available for bone rotation change.'); }
   };
   
+  const handleAnimationsLoaded = () => {
+    setAnimationsLoaded(true);
+    // Start playing idle animation once animations are loaded
+    if (modelRef.current && !idleAnimationStarted.current) {
+      console.log('[Scene3D] Starting idle animation loop');
+      modelRef.current.playAnimation('idle');
+      idleAnimationStarted.current = true;
+    }
+  };
+  
   const handleAnimationClick = (clipName: string) => { 
     console.log(`Scene3D: Playing animation: ${clipName}`);
     if (modelRef.current) {
       console.log(`[Scene3D] Calling modelRef.current.playAnimation('${clipName}')`);
       modelRef.current.playAnimation(clipName);
+      // Reset the idle animation flag so it will restart when this animation completes
+      if (clipName !== 'idle') {
+        idleAnimationStarted.current = false;
+      }
     } else { console.warn('Model ref not available for animation.'); }
   };
 
@@ -1529,7 +1590,7 @@ export default function Scene3D() {
   }, []);
 
   return (
-    <div className="relative w-full h-screen">
+    <div className="relative w-full h-screen bg-gradient-to-br from-slate-900 to-slate-700">
       <Canvas 
         shadows 
         camera={{ 
@@ -1540,11 +1601,12 @@ export default function Scene3D() {
       >
         <Suspense fallback={null}>
           <PerspectiveCamera
-            makeDefault
-            fov={50}
             ref={cameraRef}
-            position={[-0.18, 1.73, 1.2]} 
-            rotation={[THREE.MathUtils.degToRad(-11.36), THREE.MathUtils.degToRad(-22.22), THREE.MathUtils.degToRad(-4.35)]}
+            makeDefault
+            position={[-0.18, 1.73, 1.2]}
+            fov={50}
+            near={0.1}
+            far={1000}
           />
 
           <CameraRig
@@ -1558,7 +1620,7 @@ export default function Scene3D() {
           <Model
             ref={modelRef}
             onMorphTargetsLoaded={(targets) => { setMorphTargets(targets); setShowControls(true); }}
-            onAnimationsLoaded={() => { setAnimationsLoaded(true); }}
+            onAnimationsLoaded={handleAnimationsLoaded}
             animationsLoaded={animationsLoaded}
           />
 
