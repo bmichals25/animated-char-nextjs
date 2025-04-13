@@ -1107,8 +1107,8 @@ export default function Scene3D() {
   
   // Add camera logging state
   const [cameraInfo, setCameraInfo] = useState<{position: [number, number, number], rotation: [number, number, number]}>({
-    position: [-0.22, 1.87, 1.2],
-    rotation: [-20.41, -24.79, -8.87]
+    position: [-0.15, 1.74, 1.15],
+    rotation: [-12.2, -20.83, -4.4]
   });
   const [showCameraInfo, setShowCameraInfo] = useState<boolean>(false);
   const orbitControlsRef = useRef<any>(null);
@@ -1269,8 +1269,8 @@ export default function Scene3D() {
         <Suspense fallback={null}>
           <PerspectiveCamera 
             makeDefault 
-            position={[-0.22, 1.87, 1.2]} 
-            rotation={[THREE.MathUtils.degToRad(-20.41), THREE.MathUtils.degToRad(-24.79), THREE.MathUtils.degToRad(-8.87)]}
+            position={[-0.15, 1.74, 1.15]} 
+            rotation={[THREE.MathUtils.degToRad(-12.2), THREE.MathUtils.degToRad(-20.83), THREE.MathUtils.degToRad(-4.4)]}
             fov={50} 
             ref={cameraRef}
           />
