@@ -1252,6 +1252,11 @@ export default function Scene3D() {
   const [showCameraWindow, setShowCameraWindow] = useState<boolean>(false); // Hidden by default
   const [showFacialControls, setShowFacialControls] = useState<boolean>(false); // Hidden by default
   const [showKeyHints, setShowKeyHints] = useState<boolean>(false); // Hide key hints by default
+  const [showTextInput, setShowTextInput] = useState<boolean>(false); // Added for F10 text input
+  const [textInputValue, setTextInputValue] = useState<string>("");
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [boneControls, setBoneControls] = useState<AllBoneControls>({ 
     'CC_Base_Head': { rotation: [0, 0, 0] },
     'CC_Base_L_Upperarm': { rotation: [0, 0, 0] },
@@ -1537,7 +1542,7 @@ export default function Scene3D() {
     }
   }, []);
 
-  // Add keyboard event listeners for F8 and F9
+  // Add keyboard event listeners for F8, F9, and F10
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // F8 toggles camera window
@@ -1553,6 +1558,13 @@ export default function Scene3D() {
         setShowFacialControls(prev => !prev);
         console.log('[Scene3D] Facial controls toggled:', !showFacialControls);
       }
+
+      // F10 toggles text input box
+      if (e.key === 'F10') {
+        e.preventDefault(); // Prevent default browser action
+        setShowTextInput(prev => !prev);
+        console.log('[Scene3D] Text input box toggled:', !showTextInput);
+      }
     };
     
     // Add event listener
@@ -1562,7 +1574,91 @@ export default function Scene3D() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showCameraWindow, showFacialControls]);
+  }, [showCameraWindow, showFacialControls, showTextInput]);
+
+  // Handle text input submission
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!textInputValue.trim()) return;
+    
+    console.log('Text input submitted:', textInputValue);
+    
+    try {
+      setIsSpeaking(true);
+      setSpeechError(null);
+      
+      // Cancel any ongoing speech
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      
+      // Send text to ElevenLabs API
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: textInputValue }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate speech');
+      }
+      
+      // Create and play audio
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      // Play the talk animation during speech
+      if (modelRef.current) {
+        modelRef.current.playAnimation('talk');
+      }
+      
+      // Set up event handlers
+      audio.addEventListener('ended', () => {
+        setIsSpeaking(false);
+        
+        // Return to idle animation when speech ends
+        if (modelRef.current) {
+          modelRef.current.playAnimation('idle');
+        }
+        
+        // Clean up
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+      });
+      
+      await audio.play();
+      
+    } catch (error) {
+      console.error('Speech generation error:', error);
+      setSpeechError(error instanceof Error ? error.message : 'Failed to generate speech');
+      setIsSpeaking(false);
+      
+      // Return to idle animation if there's an error
+      if (modelRef.current) {
+        modelRef.current.playAnimation('idle');
+      }
+    }
+    
+    // Don't clear input after submission so user can try again if it fails
+    // setTextInputValue('');
+  };
+  
+  // Clean up audio when component unmounts
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   // Add event listeners for fn key to show/hide key hints
   useEffect(() => {
@@ -1726,7 +1822,45 @@ export default function Scene3D() {
       {/* Keyboard shortcut info - only visible when Alt key is pressed */}
       {showKeyHints && (
         <div className="absolute top-2 left-2 bg-black/60 text-white text-xs p-2 rounded">
-          Hold Alt for hints | F8: Toggle Camera Window | F9: Toggle Facial Controls
+          Hold Alt for hints | F8: Camera Window | F9: Facial Controls | F10: Text Input
+        </div>
+      )}
+
+      {/* Floating text input box */}
+      {showTextInput && (
+        <div className="absolute bottom-4 right-4 bg-white/80 backdrop-blur-sm p-4 rounded-lg shadow-lg z-10 w-96">
+          <h3 className="text-sm font-semibold mb-2 text-black">Text Input</h3>
+          <form onSubmit={handleTextSubmit}>
+            <input
+              type="text"
+              value={textInputValue}
+              onChange={(e) => setTextInputValue(e.target.value)}
+              className="w-full p-3 border rounded mb-2 text-sm text-gray-700"
+              placeholder="Enter text here..."
+              autoFocus
+              disabled={isSpeaking}
+            />
+            {speechError && (
+              <div className="text-red-500 text-xs mb-2">{speechError}</div>
+            )}
+            <div className="flex space-x-2">
+              <button 
+                type="submit" 
+                className="flex-1 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isSpeaking || !textInputValue.trim()}
+              >
+                {isSpeaking ? 'Speaking...' : 'Speak'}
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setShowTextInput(false)}
+                className="px-3 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600"
+                disabled={isSpeaking}
+              >
+                Close
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
