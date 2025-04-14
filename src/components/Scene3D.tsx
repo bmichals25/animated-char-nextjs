@@ -833,10 +833,13 @@ const Model = forwardRef<ModelRef, {
         action.setLoop(THREE.LoopRepeat, Infinity);
         action.play();
         currentAction.current = action;
-        onAnimationsLoaded(); // Signal to parent that animations are ready
+        // No need to call onAnimationsLoaded() here again if it's already called in checkAnimationsLoaded
+        // But keep it if Scene3D needs this signal specifically from this effect.
+        // Let's assume checkAnimationsLoaded is sufficient. 
+        // onAnimationsLoaded(); 
       }
     }
-  }, [animationsLoaded, onAnimationsLoaded]);
+  }, [animationsLoaded]); // Removed onAnimationsLoaded from dependency array if not called here
   
   // Apply a preset expression
   const applyExpression = (presetName: string) => {
@@ -887,16 +890,22 @@ const Model = forwardRef<ModelRef, {
     setMorphTargets(newTargets);
     
     // Notify parent component (keep this part)
+    // Remove onMorphTargetsLoaded call here if it's only for speech updates.
+    // Keep if the ControlPanel needs updated targets after a preset.
+    // Let's assume ControlPanel needs it.
     onMorphTargetsLoaded(newTargets);
   };
   
-  // Handle preset click from parent
+  // Handle preset click from parent - This useEffect seems redundant or for speech?
+  // Let's remove it unless it's crucial for non-speech preset handling.
+  /*
   useEffect(() => {
     // Expose the applyExpression function to the parent component
     if (onPresetClick) {
       onMorphTargetsLoaded({...morphTargets});
     }
   }, [onMorphTargetsLoaded, morphTargets]);
+  */
   
   // Render loading state if model is still loading
   if (modelLoading) {
@@ -1619,9 +1628,15 @@ export default function Scene3D() {
           <directionalLight position={[5, 5, 5]} intensity={1.5} castShadow />
           <Model
             ref={modelRef}
-            onMorphTargetsLoaded={(targets) => { setMorphTargets(targets); setShowControls(true); }}
-            onAnimationsLoaded={handleAnimationsLoaded}
-            animationsLoaded={animationsLoaded}
+            onMorphTargetsLoaded={(targets) => { 
+              setMorphTargets(targets); 
+              setShowControls(true); 
+              // No speech-related setup needed here
+            }}
+            onAnimationsLoaded={handleAnimationsLoaded} // Pass the correct handler
+            animationsLoaded={animationsLoaded} // Pass the state
+            // Remove onPresetClick prop if it's not needed by Model anymore
+            // onPresetClick={handlePresetClick} // Assuming presets are handled internally or via ControlPanel
           />
 
           <OrbitControls
