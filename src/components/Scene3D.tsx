@@ -1253,9 +1253,11 @@ export default function Scene3D() {
   const [showFacialControls, setShowFacialControls] = useState<boolean>(false); // Hidden by default
   const [showKeyHints, setShowKeyHints] = useState<boolean>(false); // Hide key hints by default
   const [showTextInput, setShowTextInput] = useState<boolean>(false); // Added for F10 text input
+  const [showBlankBox, setShowBlankBox] = useState<boolean>(false); // Added for blank box under text input
   const [textInputValue, setTextInputValue] = useState<string>("");
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [alignmentData, setAlignmentData] = useState<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [boneControls, setBoneControls] = useState<AllBoneControls>({ 
     'CC_Base_Head': { rotation: [0, 0, 0] },
@@ -1559,11 +1561,12 @@ export default function Scene3D() {
         console.log('[Scene3D] Facial controls toggled:', !showFacialControls);
       }
 
-      // F10 toggles text input box
+      // F10 toggles text input box and blank box
       if (e.key === 'F10') {
         e.preventDefault(); // Prevent default browser action
         setShowTextInput(prev => !prev);
-        console.log('[Scene3D] Text input box toggled:', !showTextInput);
+        setShowBlankBox(prev => !prev);
+        console.log('[Scene3D] Text input box and blank box toggled:', !showTextInput);
       }
     };
     
@@ -1587,6 +1590,7 @@ export default function Scene3D() {
     try {
       setIsSpeaking(true);
       setSpeechError(null);
+      setAlignmentData(null);
       
       // Cancel any ongoing speech
       if (audioRef.current) {
@@ -1606,6 +1610,20 @@ export default function Scene3D() {
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to generate speech');
+      }
+      
+      // Extract the alignment data from the response headers
+      const alignmentDataHeader = response.headers.get('X-Alignment-Data');
+      if (alignmentDataHeader) {
+        try {
+          const alignmentData = JSON.parse(alignmentDataHeader);
+          console.log('Alignment data received:', alignmentData);
+          setAlignmentData(alignmentData);
+        } catch (error) {
+          console.error('Error parsing alignment data:', error);
+        }
+      } else {
+        console.log('No alignment data received from API');
       }
       
       // Create and play audio
@@ -1639,6 +1657,7 @@ export default function Scene3D() {
       console.error('Speech generation error:', error);
       setSpeechError(error instanceof Error ? error.message : 'Failed to generate speech');
       setIsSpeaking(false);
+      setAlignmentData(null);
       
       // Return to idle animation if there's an error
       if (modelRef.current) {
@@ -1861,6 +1880,79 @@ export default function Scene3D() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Blank box underneath text input - now display alignment data */}
+      {showBlankBox && (
+        <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm p-4 rounded-lg shadow-lg z-10 w-96 h-auto max-h-80 overflow-y-auto">
+          <h3 className="text-sm font-semibold mb-2 text-black">ElevenLabs Timing Data</h3>
+          {isSpeaking && alignmentData ? (
+            <div className="text-xs text-gray-700">
+              {alignmentData.duration && (
+                <div className="mb-2">
+                  <span className="font-semibold">Speech Duration:</span> 
+                  {`${(alignmentData.duration / 1000).toFixed(2)}s`}
+                </div>
+              )}
+
+              {/* Display alignment data in a more flexible way */}
+              {alignmentData.segments ? (
+                <div>
+                  <div className="mb-1 font-semibold">Word Timing:</div>
+                  <div className="grid grid-cols-3 gap-1 mb-2">
+                    <div className="font-medium">Word</div>
+                    <div className="font-medium">Start (s)</div>
+                    <div className="font-medium">End (s)</div>
+                  </div>
+                  {alignmentData.segments.map((segment: any, index: number) => (
+                    <div key={index} className="grid grid-cols-3 gap-1 border-b border-gray-200 py-1">
+                      <div>{segment.text || ""}</div>
+                      <div>{segment.start ? (segment.start).toFixed(3) : "N/A"}</div>
+                      <div>{segment.end ? (segment.end).toFixed(3) : "N/A"}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : alignmentData.words ? (
+                <div>
+                  <div className="mb-1 font-semibold">Word Timing:</div>
+                  <div className="grid grid-cols-3 gap-1 mb-2">
+                    <div className="font-medium">Word</div>
+                    <div className="font-medium">Start (s)</div>
+                    <div className="font-medium">End (s)</div>
+                  </div>
+                  {alignmentData.words.map((word: any, index: number) => {
+                    // Handle different property names in API responses
+                    const wordText = word.word || word.text || "";
+                    const startTime = word.start || word.start_time || 0;
+                    const endTime = word.end || word.end_time || 0;
+                    const timeMultiplier = startTime > 10 ? 1 : 1000; // Convert to seconds if needed
+                    
+                    return (
+                      <div key={index} className="grid grid-cols-3 gap-1 border-b border-gray-200 py-1">
+                        <div>{wordText}</div>
+                        <div>{(startTime / timeMultiplier).toFixed(3)}</div>
+                        <div>{(endTime / timeMultiplier).toFixed(3)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-1 font-semibold">Raw Alignment Data:</div>
+                  <pre className="bg-gray-100 p-2 rounded text-[9px] overflow-auto max-h-48">
+                    {JSON.stringify(alignmentData, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500 italic">
+              {isSpeaking 
+                ? "Loading timing data..." 
+                : "Submit text in the input box to generate speech and view timing data."}
+            </div>
+          )}
         </div>
       )}
     </div>
