@@ -58,6 +58,10 @@ To add more advanced features:
 - Create model positioning controls
 - Implement custom shaders for special effects
 
+## Alt Approach
+
+This branch implements an alternative approach to the 3D scene viewer, exploring different techniques for model loading and rendering.
+
 ## Learn More
 
 - [Three.js Documentation](https://threejs.org/docs/)
